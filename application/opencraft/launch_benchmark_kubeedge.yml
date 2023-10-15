@@ -14,7 +14,7 @@
 
     - name: Create job multiple times
       shell: |
-        for i in `seq 0 {{ replicas }}`
+        for i in `seq 1 {{ replicas }}`
         do
           cat "/home/{{ username }}/job-template.yaml" | sed "s/\%ITEM/$i/" \
           > "/home/{{ username }}/jobs/job-$i.yaml"

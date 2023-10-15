@@ -131,7 +131,7 @@ extras:
 world:
   name: world
   seed: ''
-  level-type: FLAT
+  level-type: default
   spawn-radius: 16
   view-distance: 8
   gen-structures: true

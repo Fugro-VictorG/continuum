@@ -85,7 +85,17 @@ def start_endpoint_default(config, machines):
             cont_name = "endpoint%i" % (worker_i * end_per_work + endpoint_i)
 
             # TODO Move this to arguments to make it more flexible
-            env = ["FREQUENCY=%i" % (config["benchmark"]["frequency"])]
+            env = []
+            if config["benchmark"]["application"] == "image_classification":
+                env.append("FREQUENCY=%i" % (config["benchmark"]["frequency"]))
+            elif config["benchmark"]["application"] == "opencraft":
+                env.append(f"HOST={worker_ip}")
+                env.append(f"PORT={30000 + worker_i + 1}")
+                env.append(f"USERNAME=endpointX{worker_i}X{endpoint_i}")
+                env.append("BOX_WIDTH=20")
+                env.append(f"NUMBER_STEPS={config['benchmark']['steps_bot']}")
+                env.append(f"NUMBER_BOTS={config['infrastructure']['endpoint_nodes']}")
+                env.append(f"JOIN_STRATEGY={config['benchmark']['join_strategy']}")
 
             if config["mode"] == "cloud" or config["mode"] == "edge":
                 cont_name = "%s%i_" % (config["mode"], worker_i) + cont_name
@@ -289,6 +299,9 @@ def wait_endpoint_completion(config, machines, sshs, container_names):
                     ssh.split("@")[0],
                     status_line,
                 )
+                command = "docker logs %s" % cont_name
+                output, error = machines[0].process(config, command, shell=True, ssh=ssh_entry)[0]
+                logging.error("Container log:\nOutput:\n%s\nError:\n%s", output, error)
                 sys.exit()
 
     logging.info("All endpoint or mist containers have finished")
@@ -325,8 +338,12 @@ def get_endpoint_output(config, machines, container_names, use_ssh=True):
         logging.info("Get output from endpoint %s on VM %s", container, ssh)
 
         if error:
-            logging.error("".join(error))
-            sys.exit()
+            if "Trace: Warning:" not in error:
+                logging.error("".join(error))
+                logging.error(type(error))
+                #sys.exit()
+            
+            logging.error("Trace warning: ".join(error))
         elif not output:
             logging.error("Container %s output empty", container)
             sys.exit()

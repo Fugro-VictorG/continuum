@@ -254,7 +254,14 @@ def kube(config, machines):
 
     # Start the endpoint
     container_names = endpoint.start_endpoint(config, machines)
-    endpoint.wait_endpoint_completion(config, machines, config["endpoint_ssh"], container_names)
+
+    if config["benchmark"]["application"] == "opencraft" and config["benchmark"]["join_strategy"] == "LinearJoin":
+        wait_linear_join_completion(config, machines)
+    else:
+        endpoint.wait_endpoint_completion(config, machines, config["endpoint_ssh"], container_names)
+
+    if config["benchmark"]["application"] == "opencraft":
+       stop_opencraft(config, machines)
 
     # Wait for benchmark to finish
     kubernetes.wait_worker_completion(config, machines)
@@ -349,3 +356,51 @@ def kube_control(config, machines):
         resource_output=resource_output,
         endtime=float(endtime - starttime),
     )
+
+def stop_opencraft(config, machines):
+    """_summary_
+    Args:
+        config (_type_): _description_
+        machines (_type_): _description_
+    """
+    command = "kubectl get pods -l applicationRunning=opencraft-server --no-headers"
+    output, error = machines[0].process(config, command, shell=True, ssh=config["cloud_ssh"][0])[0]
+
+    for line in output:
+        pod_name = line.split()[0]
+        command = (
+            '"kubectl exec -it '
+            + pod_name
+            + " -- /bin/sh -c 'pkill java' "
+            + '--kubeconfig=/home/cloud_controller/.kube/config"'
+        )
+        output, error = machines[0].process(
+            config, (command), shell=True, ssh=config["cloud_ssh"][0]
+        )[0]
+        
+        if any(output):
+            logging.info(output)
+        if any(["input is not a terminal or the right kind of file" not in e for e in error]):
+            logging.error(error)
+            sys.exit()
+            
+def wait_linear_join_completion(config, machines):
+    logging.info("Waiting for opencraft bots to all join before ending benchmark")
+
+    command = "kubectl get pods -l applicationRunning=opencraft-server --no-headers"
+    output, error = machines[0].process(config, command, shell=True, ssh=config["cloud_ssh"][0])[0]
+
+    # check all servers if they contain
+    for line in output:
+        pod_name = line.split()[0]
+        while True:
+            command = f"kubectl logs {pod_name}"
+            output, error = machines[0].process(
+                config, command, shell=True, ssh=config["cloud_ssh"][0]
+            )[0]
+            if error:
+                logging.error(error)
+                exit()
+
+            if any("Experiment complete" in o for o in output):
+                break

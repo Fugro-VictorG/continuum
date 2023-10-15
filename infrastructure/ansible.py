@@ -225,14 +225,13 @@ def create_inventory_vm(config, machines):
             f.write("\n[cloudcontroller]\n")
             f.write(
                 "%s ansible_connection=ssh ansible_host=%s ansible_user=%s \
-username=%s cloud_mode=%i kubeversion=%s\n"
+username=%s cloud_mode=%i\n"
                 % (
                     machines[0].cloud_controller_names[0],
                     machines[0].cloud_controller_ips[0],
                     machines[0].cloud_controller_names[0],
                     machines[0].cloud_controller_names[0],
                     config["mode"] == "cloud",
-                    config["benchmark"]["kube_version"][1:],
                 )
             )
 
@@ -387,15 +386,16 @@ def copy(config, machines):
         d = dest + "launch_benchmark.yml"
         out.append(machines[0].copy_files(config, path, d))
 
-        # copy opencraft template file as well, it uses an extra template file
-        path = os.path.join(
-            config["base"],
-            "application",
-            config["benchmark"]["application"],
-            "template_server.yml.j2",
-        )
-        d = dest + "template_server.yml.j2"
-        out.append(machines[0].copy_files(config, path, d))
+        if config["benchmark"]["application"] == "opencraft":
+            # copy opencraft template file as well, it uses an extra template file
+            path = os.path.join(
+                config["base"],
+                "application",
+                config["benchmark"]["application"],
+                "template_server.yml.j2",
+            )
+            d = dest + "template_server.yml.j2"
+            out.append(machines[0].copy_files(config, path, d))
 
     # Copy playbooks for installing resource managers and execution_models
     if not config["infrastructure"]["infra_only"]:
