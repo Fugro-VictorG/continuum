@@ -382,84 +382,101 @@ ENDPOINTS               %s""" % (
             results2 = [sub[1:] for sub in results1]
             results_dict = dict(zip(results2[0], results2[1]))
             for key in results_dict:
-                run[key] = float(results_dict[key])
+                run[key] = float(results_dict[key]) if results_dict[key] else ''
 
     def plot(self):
         """Plot the results from executed runs"""
         # set width of bar
         plt.rcParams.update({"font.size": 22})
-        _, ax1 = plt.subplots(figsize=(12, 6))
+        _, ax1 = plt.subplots(1, 2, figsize=(24, 6))
 
-        x = [run["network_latency"] for run in self.runs if run["cpu_quota_memory"] == 2]
+        y1 = [run["ticks_mean"] for run in self.runs]
+        y2 = [run["ticks_median"] for run in self.runs]
+        y3 = [run["ticks_stdev"] for run in self.runs]
+        x = self.endpoints
+        
+        ax1[0].plot(
+            x,
+            y1,
+            linewidth=3.0,
+            marker="o",
+            markersize=12,
+            label="Tick duration mean [ms]"
+        )
 
-        for cpu, quota in zip(self.cpu, self.quota):
-            cpu_quota = cpu * quota
-            y1 = [run["response_time_dig_mean"] for run in self.runs if run["cpu_quota_memory"] == cpu_quota]
-            y2 = [run["response_time_place_mean"] for run in self.runs if run["cpu_quota_memory"] == cpu_quota]
+        ax1[0].plot(
+            x,
+            y2,
+            linewidth=3.0,
+            marker="o",
+            markersize=12,
+            label="Tick duration median [ms]"
+        )
 
-            ax1.plot(
-                x,
-                y1,
-                linewidth=3.0,
-                marker="o",
-                markersize=12,
-                label="Block digging",
-            )
-
-            ax1.plot(
-                x,
-                y2,
-                linewidth=3.0,
-                marker="o",
-                markersize=12,
-                label="Block placement"
-            )
+        ax1[1].plot(
+            x,
+            y3,
+            linewidth=3.0,
+            marker="o",
+            markersize=12,
+            label="Tick duration standard dev"
+        )
 
         # Set y axis: latency
-        ax1.set_ylabel("Average response time [ms]")
-        ax1.set_yscale("linear")
-        ax1.set_ylim(10, 300)
-        ax1.set_yticks(np.arange(0, 325, 25))
+        ax1[0].set_xlabel("Number of connected endpoints")
+        ax1[0].set_xlim(25, 150)
+        ax1[0].set_xticks(np.arange(0, 200, 25))
 
-        ax1.set_xlabel("Network latency between cloud and endpoint [ms]")
-        ax1.set_xlim(0, 100)
-        ax1.set_xticks(np.arange(0, 110, 10))
+        ax1[0].set_ylabel("Tick duration statistics")
+        ax1[0].set_yscale("linear")
+        ax1[0].set_ylim(0, 50)
+        ax1[0].set_yticks(np.arange(0, 50, 10))
 
-        ax1.legend(loc="best", framealpha=1.0, ncol=3, bbox_to_anchor=[0.5, 0.37])
+        ax1[0].legend(loc="upper left", framealpha=1.0)
 
         #ax1.axhline(y=10, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=100, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=200, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=300, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=400, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=500, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=600, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=700, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=800, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=900, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=1000, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=1100, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1[0].axhline(y=10, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1[0].axhline(y=20, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1[0].axhline(y=30, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1[0].axhline(y=40, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1[0].axhline(y=50, color="k", linestyle="-", linewidth=1, alpha=0.5)
+
+        ax1[1].set_xlabel("Number of connected endpoints")
+        ax1[1].set_xlim(25, 150)
+        ax1[1].set_xticks(np.arange(0, 200, 25))
+
+        ax1[1].set_ylabel("Tick duration standard deviation")
+        ax1[1].set_yscale("linear")
+        ax1[1].set_ylim(0, 150)
+        ax1[1].set_yticks(np.arange(0, 150, 25))
+
+        ax1[1].axhline(y=25, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1[1].axhline(y=50, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1[1].axhline(y=75, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1[1].axhline(y=100, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1[1].axhline(y=125, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1[1].axhline(y=150, color="k", linestyle="-", linewidth=1, alpha=0.5)
 
         # Save
         t = time.strftime("%Y-%m-%d_%H:%M:%S", time.gmtime())
-        plt.savefig("./logs/OCLatencyCPUVariation_%s.pdf" % (t), bbox_inches="tight")
+        plt.savefig("./logs/OCEndpointScaling_%s.pdf" % (t), bbox_inches="tight")
 
     def print_result(self):
         """Print results of runs as text"""
         for run in self.runs:
             logging.info(
-                "Tick duration avg: %5i ms | \
+                "Tick duration mean: %5i ms | \
+                Tick duration median: %5i ms | \
                 Tick duration stdev: %5i ms | \
-CPU Cores x Quota == Memory: %5f | \
 Response time dig mean: %5i ms | \
 Response time dig median: %5i ms | \
 Response time dig stdev: %5i | \
 Response time place mean: %5i ms | \
 Response time place median: %5i ms | \
 Response time place stdev: %5i",
-                run["ticks_avg"],
+                run["ticks_mean"],
+                run["ticks_median"],
                 run["ticks_stdev"],
-                run["cpu_quota_memory"],
                 run["response_time_dig_mean"],
                 run["response_time_dig_median"],
                 run["response_time_dig_stdev"],
