@@ -3,9 +3,44 @@
   become: true
   tasks:
     - name: Create job file
-      template:
-        src: template_server.yml.j2
-        dest: /home/{{ username }}/job-template.yaml
+      shell: |
+        cat > "/home/{{ username }}/job-template.yaml" <<EOF
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: {{ app_name }}-%ITEM
+          labels:
+            app.kubernetes.io/name: {{ app_name }}-%ITEM
+            applicationRunning: 'opencraft-server'
+        spec:
+          restartPolicy: Never # important so that server can be stopped without making K8 recreate the pod
+          containers:
+          - name: {{ app_name }}
+            image: {{ image }}
+            ports:
+              - containerPort: 25565
+                name: server-port
+            imagePullPolicy: Always
+            resources:
+              requests:
+                memory: "{{ memory_req }}Mi"
+                cpu: {{ cpu_req }}
+
+        ---
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: {{ app_name }}-service-%ITEM
+        spec:
+          type: NodePort
+          selector:
+            app.kubernetes.io/name: {{ app_name }}-%ITEM
+          ports:
+          - name: server-service-port
+            port: 25565
+            nodePort: 3000%ITEM
+            targetPort: server-port
+        EOF
 
     - name: Create job directory
       file:
