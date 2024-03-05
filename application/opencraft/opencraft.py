@@ -88,8 +88,10 @@ def gather_worker_metrics(_machines, _config, worker_output, _starttime):
         "ticks_median": None
     }
 
-    for i, out in enumerate(worker_output):
+    # ONLY ONE WORKER
+    for i, pod_out in enumerate(worker_output):
         logging.info("Parse output from worker node %i", i)
+        out = pod_out[1]
         w_metrics = copy.deepcopy(worker_set)
         w_metrics["worker_id"] = i
 

@@ -5,6 +5,8 @@ Mostly used for calling specific application code
 
 import logging
 import sys
+import math
+import time
 
 from datetime import datetime
 
@@ -80,8 +82,9 @@ def print_raw_output(config, worker_output, endpoint_output):
         logging.debug("%s OUTPUT", config["mode"].upper())
         logging.debug("------------------------------------")
         for _, out in worker_output:
-            for line in out:
-                logging.debug(line)
+            if out.len() < 1000:
+                for line in out:
+                    logging.debug(line)
 
             logging.debug("------------------------------------")
 
@@ -256,7 +259,7 @@ def kube(config, machines):
     container_names = endpoint.start_endpoint(config, machines)
 
     if config["benchmark"]["application"] == "opencraft" and config["benchmark"]["join_strategy"] == "LinearJoin":
-        wait_linear_join_completion(config, machines)
+        wait_linear_join_completion(config)
     else:
         endpoint.wait_endpoint_completion(config, machines, config["endpoint_ssh"], container_names)
 
@@ -384,23 +387,9 @@ def stop_opencraft(config, machines):
             logging.error(error)
             sys.exit()
             
-def wait_linear_join_completion(config, machines):
-    logging.info("Waiting for opencraft bots to all join before ending benchmark")
-
-    command = "kubectl get pods -l applicationRunning=opencraft-server --no-headers"
-    output, error = machines[0].process(config, command, shell=True, ssh=config["cloud_ssh"][0])[0]
-
-    # check all servers if they contain
-    for line in output:
-        pod_name = line.split()[0]
-        while True:
-            command = f"kubectl logs {pod_name}"
-            output, error = machines[0].process(
-                config, command, shell=True, ssh=config["cloud_ssh"][0]
-            )[0]
-            if error:
-                logging.error(error)
-                exit()
-
-            if any("Experiment complete" in o for o in output):
-                break
+def wait_linear_join_completion(config):
+    start_time = time.time()
+    time_limit = math.floor(config["infrastructure"]["endpoint_nodes"] / 10) * 120
+    elapsed_time = (time.time() - start_time)
+    while (elapsed_time < time_limit):
+        elapsed_time = (time.time() - start_time)
