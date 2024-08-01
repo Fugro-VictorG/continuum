@@ -65,6 +65,7 @@ def start(config, machines):
     commands.append(
         [
             "ansible-playbook",
+            "-v",
             "-i",
             os.path.join(config["infrastructure"]["base_path"], ".continuum/inventory_vms"),
             os.path.join(
@@ -358,6 +359,11 @@ def busy_wait_opencraft_server(config, machines):
 
     logging.info("Waiting for opencraft to be ready for connections")
 
+    if config["benchmark"]["server"] == "opencraft":
+        readyMessage = "Ready for connections"
+    else:
+        readyMessage = "Done"
+
     command = "kubectl get pods -l applicationRunning=opencraft-server --no-headers"
     output, error = machines[0].process(config, command, shell=True, ssh=config["cloud_ssh"][0])[0]
 
@@ -373,7 +379,7 @@ def busy_wait_opencraft_server(config, machines):
                 logging.error(error)
                 exit()
 
-            if any("Ready for connections" in o for o in output):
+            if any(readyMessage in o for o in output):
                 break
 
 
