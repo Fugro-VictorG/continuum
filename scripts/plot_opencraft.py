@@ -9,13 +9,14 @@ import os
 
 from io import StringIO
 
+import seaborn as sbn
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 import matplotlib.patches as mpatches
 import numpy as np
 import pandas as pd
 
-from matplotlib.ticker import ScalarFormatter
+from matplotlib.ticker import FuncFormatter, ScalarFormatter
 from matplotlib.ticker import NullFormatter
 from matplotlib.ticker import MaxNLocator
 
@@ -63,7 +64,7 @@ class Experiment:
         if self.resume is None:
             return
 
-        log_location = "./logs"
+        log_location = "./logs/" + self.log_directory
         logs = [f for f in os.listdir(log_location) if f.endswith(".log")]
         logs.sort()
         exp_i = 0
@@ -142,6 +143,7 @@ class LatencyCPUVariation(Experiment):
         self.cpu = [2]#[1, 1, 2, 4, 8]
         self.memory = [2]#[0.5, 1.0, 2.0, 4.0, 8.0]
         self.quota = [1]#[0.5, 1.0, 1.0, 1.0, 1.0]
+        self.log_directory = "mc_latency_0-500_9core"
 
         self.y = None
 
@@ -195,23 +197,156 @@ QUOTA                   %s""" % (
     def parse_output(self):
         """For all runs, get the worker runtime"""
         for run in self.runs:
-            # Get the line containing the metrics
-            i = -10
+            # # Get the line containing the metrics
+            # i = -10
+            # for i, line in enumerate(run["output"]):
+            #     if "Output in csv format" in line:
+            #         break
+
+            # # Get output based on type of run
+            # raw_results = run["output"][i:][1]
+
+            # # Get endpoint output, parse into dataframe
+            # results1 = [x.split(",") for x in raw_results.split("\\n")]
+            # results2 = [sub[1:] for sub in results1]
+            # results_dict = dict(zip(results2[0], results2[1]))
+            # for key in results_dict:
+            #     run[key] = float(results_dict[key])
+
             for i, line in enumerate(run["output"]):
-                if "Output in csv format" in line:
-                    break
+                if "Measurer spawned" in line:
+                    break 
+            
+            # Response times
+            run["dig_times"] = []
+            run["place_times"] = []
+            raw_results = run["output"][(i + 1):]
+            i = 0
+            while "----------------------------" not in raw_results[i]:
+                if "Msr dig:" in raw_results[i]: 
+                    measured_value = str.strip(raw_results[i].split('Msr dig:')[1])
+                    run["dig_times"].append(measured_value)
+                elif "Msr place:" in raw_results[i]:
+                    measured_value = str.strip(raw_results[i].split('Msr place:')[1])
+                    run["place_times"].append(measured_value)
+                i += 1
 
-            # Get output based on type of run
-            raw_results = run["output"][i:][1]
 
-            # Get endpoint output, parse into dataframe
-            results1 = [x.split(",") for x in raw_results.split("\\n")]
-            results2 = [sub[1:] for sub in results1]
-            results_dict = dict(zip(results2[0], results2[1]))
-            for key in results_dict:
-                run[key] = float(results_dict[key])
+    def plot2(self):
+        x = [run["network_latency"] for run in self.runs if run["cpu_quota_memory"] == 2]
+        x = [int(elem) * 5 for elem in x]
+        y1 = [run["dig_times"] for run in self.runs]
+        y2 = [run["place_times"] for run in self.runs]
+        y1 = [[int(x) for x in lst] for lst in y1]
+        y2 = [[int(x) for x in lst] for lst in y2]
+
+        def pad_list(lst, length):
+                return lst + [float('nan')] * (length - len(lst))
+
+        # Pad sublists in y1 and y2
+        max_length_y1 = max(len(sublist) for sublist in y1)
+        max_length_y2 = max(len(sublist) for sublist in y2)
+        y1_padded = [pad_list(sublist, max_length_y1) for sublist in y1]
+        y2_padded = [pad_list(sublist, max_length_y2) for sublist in y2]
+
+        df = pd.DataFrame({
+            "Block digging": y1_padded,
+            "Block placement": y2_padded,
+            "Network latency": x,
+        })
+    
+        medy1 = [np.nanmedian(np.array(sublist)) for sublist in df["Block digging"]]
+        medy2 = [np.nanmedian(np.array(sublist)) for sublist in df["Block placement"]]
+
+        plt.plot(x, medy1, linewidth=1.5, label='Median (Block digging)', marker='o')
+        #plt.plot(x, medy2, linewidth=1.5, label='Median (Block placement)', marker='o')
+
+        plt.yticks(medy1)
+        plt.xticks(x)
+        plt.grid(True)
+        t = time.strftime("%Y-%m-%d_%H-%M-%S", time.gmtime())
+        plt.savefig("./logs/test_%s.pdf" % (t), bbox_inches="tight")
+
+
 
     def plot(self):
+        """Plot the results from executed runs"""
+        # set width of bar
+        plt.rcParams.update({"font.size": 19})
+
+        x = [run["network_latency"] for run in self.runs if run["cpu_quota_memory"] == 2]
+
+        for cpu, quota in zip(self.cpu, self.quota):
+            cpu_quota = cpu * quota
+            y1 = [run["dig_times"] for run in self.runs if run["cpu_quota_memory"] == cpu_quota]
+            y2 = [run["place_times"] for run in self.runs if run["cpu_quota_memory"] == cpu_quota]
+
+            y1 = [[int(x) for x in lst] for lst in y1]
+            y2 = [[int(x) for x in lst] for lst in y2]
+            x = [int(elem) * 5 for elem in x]
+
+            # Function to pad sublists with NaNs to ensure equal length
+            def pad_list(lst, length):
+                return lst + [float('nan')] * (length - len(lst))
+
+            # Pad sublists in y1 and y2
+            max_length_y1 = max(len(sublist) for sublist in y1)
+            max_length_y2 = max(len(sublist) for sublist in y2)
+            y1_padded = [pad_list(sublist, max_length_y1) for sublist in y1]
+            y2_padded = [pad_list(sublist, max_length_y2) for sublist in y2]
+
+            df = pd.DataFrame({
+                "Block digging": y1_padded,
+                "Block placement": y2_padded,
+                "Network latency": x,
+            })
+
+            medy1 = [np.nanmedian(np.array(sublist)) for sublist in df["Block digging"]]
+            medy2 = [np.nanmedian(np.array(sublist)) for sublist in df["Block placement"]]
+
+            df_exploded = df.explode(column=["Block digging", "Block placement"])
+
+            df_melted = pd.melt(df_exploded, id_vars=["Network latency"], var_name="Action", value_name="Values")
+
+            #df_melted = df_melted.dropna()
+
+            # Create boxplot using Seaborn
+            logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
+            plt.figure(figsize=(10, 6))
+            box_positions = sbn.boxplot(x="Network latency", y="Values", hue="Action", data=df_melted, dodge=True, palette="pastel").get_xticks()
+            plt.plot([pos-0.2 for pos in box_positions], medy1, linewidth=1.5, label='Median (Block digging)')
+            plt.plot([pos+0.2 for pos in box_positions], medy2, linewidth=1.5, label='Median (Block placement)')
+            # plt.plot(
+            #     x_axis,
+            #     meany2,
+            #     ':',
+            #     linewidth=1.5,
+            # )
+            plt.yticks(np.arange(0, 1801, 200))
+            plt.ylim(-100, 1800)
+            #plt.xlim(0, 500)
+            plt.xlabel("Network latency [ms]")
+            plt.ylabel("Response times [ms]")
+            plt.grid(True)
+
+            t = time.strftime("%Y-%m-%d_%H:%M:%S", time.gmtime())
+            plt.savefig("./logs/LatencyCPUVariation_%s.pdf" % (t), bbox_inches="tight")
+            # plt.clf()
+            # q1 = []
+            # q3 = []
+            # for sublist in df["Block digging"]:
+            #     x3, x1 = np.nanpercentile(sublist, [75, 25])
+            #     q1.append(x1)
+            #     q3.append(x3)
+
+            # iqr = [xi - yi for xi, yi in zip(q3, q1)]
+            # stdevy1 = [np.nanstd(np.array(sublist)) for sublist in df["Block digging"]]
+            # plt.plot(x, iqr)
+            # plt.grid(True)
+            # t = time.strftime("%Y-%m-%d_%H:%M:%S", time.gmtime())
+            # plt.savefig("./logs/OCLatencyStdev_%s.pdf" % (t), bbox_inches="tight")
+
+    def plot1(self):
         """Plot the results from executed runs"""
         # set width of bar
         plt.rcParams.update({"font.size": 22})
@@ -252,20 +387,20 @@ QUOTA                   %s""" % (
         ax1.set_xlim(0, 100)
         ax1.set_xticks(np.arange(0, 110, 10))
 
-        ax1.legend(loc="best", framealpha=1.0, ncol=3, bbox_to_anchor=[0.5, 0.37])
+        ax1.legend(loc="upper left", framealpha=1.0, bbox_to_anchor=[0, 1])
 
         #ax1.axhline(y=10, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1.axhline(y=25, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1.axhline(y=50, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1.axhline(y=75, color="k", linestyle="-", linewidth=1, alpha=0.5)
         ax1.axhline(y=100, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1.axhline(y=125, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1.axhline(y=150, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1.axhline(y=175, color="k", linestyle="-", linewidth=1, alpha=0.5)
         ax1.axhline(y=200, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=300, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=400, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=500, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=600, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=700, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=800, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=900, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=1000, color="k", linestyle="-", linewidth=1, alpha=0.5)
-        ax1.axhline(y=1100, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1.axhline(y=225, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1.axhline(y=250, color="k", linestyle="-", linewidth=1, alpha=0.5)
+        ax1.axhline(y=275, color="k", linestyle="-", linewidth=1, alpha=0.5)
 
         # Save
         t = time.strftime("%Y-%m-%d_%H:%M:%S", time.gmtime())
@@ -275,7 +410,8 @@ QUOTA                   %s""" % (
         """Print results of runs as text"""
         for run in self.runs:
             logging.info(
-                "Tick duration avg: %5i ms | \
+                "Tick duration mean: %5i ms | \
+                Tick duration median: %5i ms | \
                 Tick duration stdev: %5i ms | \
 CPU Cores x Quota == Memory: %5f | \
 Response time dig mean: %5i ms | \
@@ -284,7 +420,8 @@ Response time dig stdev: %5i | \
 Response time place mean: %5i ms | \
 Response time place median: %5i ms | \
 Response time place stdev: %5i",
-                run["ticks_avg"],
+                run["ticks_mean"],
+                run["ticks_median"],
                 run["ticks_stdev"],
                 run["cpu_quota_memory"],
                 run["response_time_dig_mean"],
@@ -297,21 +434,16 @@ Response time place stdev: %5i",
             
 class EndpointScaling(Experiment):
     """Experiment:
-    Deploy 1 cloud worker and 1 endpoint, and vary latency from 0ms to 100ms in steps of 10
-    Also vary the CPU cores / memory from 0.5 (GB) to 8.0 (GB)
-
-    So:
-    - Run with minimal cloud deployment
-    - Change latency from 0ms to 100ms between cloud and endpoint in steps of 10ms
-    - Change application CPU and memory from 0.5 to 8.0 in power of 2 steps
+    Deploy a cloud worker with an Opencraft server, and vary the number of endpoints per run, in increments of 25.
     """
 
     def __init__(self, resume):
         Experiment.__init__(self, resume)
 
-        self.modes = ["cloud"]#, "edge", "endpoint"]
+        self.modes = ["linear"]#, "fixed"]
         self.cores = [4]
-        self.endpoints = [25, 50, 75, 100, 125, 150]
+        self.endpoints = [20, 40, 60, 80]#, 100, 125, 150]
+        self.log_directory = "oc_endpoint_scaling"
 
         self.y = None
         self.y_load = None
@@ -331,15 +463,6 @@ ENDPOINTS               %s""" % (
         """Generate commands to run the benchmark based on the current settings"""
         # Differ in deployment modes
         for mode in self.modes:
-            if mode == "cloud":
-                config = "cloud_endpoint"
-                cores = self.cores[0]
-            elif mode == "edge":
-                config = "edge_endpoint"
-                cores = self.cores[1]
-            else:
-                config = "endpoint"
-                cores = self.cores[2]
 
             # Differ in #endpoints per worker
             for endpoint in self.endpoints:
@@ -351,13 +474,12 @@ ENDPOINTS               %s""" % (
                     "python3",
                     "continuum.py",
                     "-v",
-                    "configuration/experiment_oc_endpoint_scaling/" + config + str(endpoint) + ".cfg",
+                    "configuration/experiment_mc_endpoint_scaling/" + mode + str(endpoint) + ".cfg",
                 ]
                 command = [str(c) for c in command]
 
                 run = {
                     "mode": mode,
-                    "cores": cores,
                     "endpoints": endpoint,
                     "command": command,
                     "output": None,
@@ -369,22 +491,166 @@ ENDPOINTS               %s""" % (
         """For all runs, get the worker runtime"""
         for run in self.runs:
             # Get the line containing the metrics
+            # i = -10
+            # for i, line in enumerate(run["output"]):
+            #     if "Output in csv format" in line:
+            #         break
+
+            # # Get output based on type of run
+            # raw_results = run["output"][i:][1]
+
+            # # Get endpoint output, parse into dataframe
+            # results1 = [x.split(",") for x in raw_results.split("\\n")]
+            # results2 = [sub[1:] for sub in results1]
+            # results_dict = dict(zip(results2[0], results2[1]))
+            # for key in results_dict:
+            #     if '[' in results_dict[key]:
+            #         break
+            #     try:
+            #         run[key] = float(results_dict[key]) 
+            #     except ValueError:
+            #         continue
+
+            # Response times
             i = -10
             for i, line in enumerate(run["output"]):
-                if "Output in csv format" in line:
+                if "Measurer spawned" in line:
+                    break 
+            
+            run["dig_times"] = []
+            run["place_times"] = []
+            raw_results = run["output"][(i + 1):]
+            i = 0
+            while "----------------------------" not in raw_results[i]:
+                if "Msr dig" in raw_results[i]: 
+                    measured_value = str.strip(raw_results[i].split('Msr dig:')[1])
+                    run["dig_times"].append(measured_value)
+                elif "Msr place" in raw_results[i]:
+                    measured_value = str.strip(raw_results[i].split('Msr place:')[1])
+                    run["place_times"].append(measured_value)
+                i += 1
+            
+            # Tick times
+            i = -10
+            for i, line in enumerate(run["output"]):
+                if "Raw tick" in line:
                     break
 
-            # Get output based on type of run
-            raw_results = run["output"][i:][1]
+            run["tick_times"] = []
+            raw_results = run["output"][(i+1):]
+            i = 0
+            while i < len(raw_results) and "gather_worker_metrics" in raw_results[i]:
+                measured_value = str.strip(raw_results[i].split()[-1])
+                run["tick_times"].append(measured_value)
+                i += 1
 
-            # Get endpoint output, parse into dataframe
-            results1 = [x.split(",") for x in raw_results.split("\\n")]
-            results2 = [sub[1:] for sub in results1]
-            results_dict = dict(zip(results2[0], results2[1]))
-            for key in results_dict:
-                run[key] = float(results_dict[key]) if results_dict[key] else ''
 
     def plot(self):
+        """Plot the results from executed runs"""
+        # set width of bar
+        plt.rcParams.update({"font.size": 19})
+
+        x = [run["endpoints"] for run in self.runs]
+
+        y1 = [run["tick_times"] for run in self.runs]
+        y1 = [[float(x) for x in lst] for lst in y1]
+
+        # Find the maximum length of sublists
+        max_length_y1 = max(len(sublist) for sublist in y1)
+
+        # Pad sublists with NaN values to ensure equal length
+        y1_padded = [sublist + [np.nan] * (max_length_y1 - len(sublist)) for sublist in y1]
+
+        y1_stacked = np.vstack(y1_padded).tolist()
+
+        logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
+        plt.figure(figsize=(10, 6))
+        
+        sbn.boxplot(data=y1_stacked, width = 0.3)
+        plt.xticks(ticks=range(len(x)), labels=x)
+        plt.yticks(np.arange(0, 1000, 100))
+        plt.axhline(y=50, color='r', linestyle='-')
+        plt.ylim(0, 400)
+        plt.xlabel("Number of players")
+        plt.ylabel("Tick duration [ms]")
+        plt.grid(True)
+
+        t = time.strftime("%Y-%m-%d_%H:%M:%S", time.gmtime())
+        #plt.savefig("./logs/MCEndpointScalingTickRates_%s.pdf" % (t), bbox_inches="tight")
+        plt.clf()
+
+        y1 = next(filter(lambda run : run["endpoints"] == 80, self.runs))["tick_times"]
+        y1 = [float(x) for x in y1]
+        x1 = []
+        x1.append(y1[0]) if y1[0] > 50 else x1.append(50)
+
+        for elem in y1[1:]:
+            x1.append(x1[-1] + elem) if elem > 50 else x1.append(x1[-1] + 50)
+        x1 = [elem / 1000 for elem in x1]
+
+        plt.plot(
+            x1,
+            y1,
+            linewidth=1.5,
+        )
+        plt.axhline(y=50, color='r')
+        plt.rcParams.update({"font.size": 19})
+        plt.ylabel("Tick duration [ms]")
+        plt.xlabel("Time [s]")
+        plt.grid(True)
+
+        plt.yticks(np.arange(0, 901, 100))
+        plt.xticks(np.arange(0, 961, 120))
+
+        #plt.xlim(0, 960)
+        t = time.strftime("%Y-%m-%d_%H:%M:%S", time.gmtime())
+        plt.savefig("./logs/MCEndpointScalingTicksOverTime80P_%s.pdf" % (t), bbox_inches="tight")
+        plt.clf()
+
+        # Response times plot  
+        y1 = [run["dig_times"] for run in self.runs]
+        y2 = [run["place_times"] for run in self.runs]
+
+        y1 = [[int(x) for x in lst] for lst in y1]
+        y2 = [[int(x) for x in lst] for lst in y2]
+
+        # Function to pad sublists with NaNs to ensure equal length
+        def pad_list(lst, length):
+            return lst + [float('nan')] * (length - len(lst))
+
+        # Pad sublists in y1 and y2
+        max_length_y1 = max(len(sublist) for sublist in y1)
+        max_length_y2 = max(len(sublist) for sublist in y2)
+        max_sublist_length = max(max_length_y1, max_length_y2)
+        y1_padded = [pad_list(sublist, max_sublist_length) for sublist in y1]
+        y2_padded = [pad_list(sublist, max_sublist_length) for sublist in y2]
+
+        df = pd.DataFrame({
+            "Block digging": y1_padded,
+            "Block placement": y2_padded,
+            "Network latency": x
+        })
+
+        df_exploded = df.explode(column=["Block digging", "Block placement"])
+
+        df_melted = pd.melt(df_exploded, id_vars=["Network latency"], var_name="Action", value_name="Values")
+
+        #df_melted = df_melted.dropna()
+
+        # Create boxplot using Seaborn
+        logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
+        plt.figure(figsize=(10, 6))
+        sbn.boxplot(x="Network latency", y="Values", hue="Action", data=df_melted, dodge=True, palette="pastel")
+        plt.ylim(0, 1000)
+        plt.yticks(np.arange(0, 1100, 100))
+        plt.xlabel("Players")
+        plt.ylabel("Response times [ms]")
+        plt.grid(True)
+
+        t = time.strftime("%Y-%m-%d_%H:%M:%S", time.gmtime())
+        #plt.savefig("./logs/MCEndpointScalingLatencies_%s.pdf" % (t), bbox_inches="tight")
+
+    def plot1(self):
         """Plot the results from executed runs"""
         # set width of bar
         plt.rcParams.update({"font.size": 22})
@@ -467,26 +733,239 @@ ENDPOINTS               %s""" % (
             logging.info(
                 "Tick duration mean: %5i ms | \
                 Tick duration median: %5i ms | \
-                Tick duration stdev: %5i ms | \
-Response time dig mean: %5i ms | \
-Response time dig median: %5i ms | \
-Response time dig stdev: %5i | \
-Response time place mean: %5i ms | \
-Response time place median: %5i ms | \
-Response time place stdev: %5i",
+                Tick duration stdev: %5i ms |",
                 run["ticks_mean"],
                 run["ticks_median"],
                 run["ticks_stdev"],
-                run["response_time_dig_mean"],
-                run["response_time_dig_median"],
-                run["response_time_dig_stdev"],
-                run["response_time_place_mean"],
-                run["response_time_place_median"],
-                run["response_time_place_stdev"]
+            )
+
+class CpuMemScaling(Experiment):
+    """Experiment:
+    Deploy a cloud worker with an Opencraft server, and vary the number of endpoints per run, in increments of 25.
+    """
+
+    def __init__(self, resume):
+        Experiment.__init__(self, resume)
+
+        self.cores = [0.5, 1, 2, 3, 4, 5, 6, 7]
+        self.modes = ["linear"]
+        self.log_directory = "oc_cpumem_scaling_40player"
+
+    def __repr__(self):
+        """Returns this string when called as print(object)"""
+        return """
+APP                     opencraft
+CPU CORES               %s""" % (
+            ",".join(str(core) for core in self.cores),
+        )
+    
+    def generate(self):
+        """Generate commands to run the benchmark based on the current settings"""
+        # Differ in deployment modes
+        for mode in self.modes:
+            # Differ in #endpoints per worker
+            for cores in self.cores:
+                cores = int(cores * 100)
+                command = [
+                    "python3",
+                    "continuum.py",
+                    "-v",
+                    "configuration/experiment_mc_cpumem_variation/cloud_0ms_cpu" + str(cores) + "_" + mode +".cfg",
+                ]
+                command = [str(c) for c in command]
+
+                run = {
+                    "cores": cores,
+                    "command": command,
+                    "output": None,
+                }
+                self.runs.append(run)
+
+    def parse_output(self):
+        """For all runs, get the worker runtime"""
+        for run in self.runs:
+            # Get the line containing the metrics
+            i = -10
+            for i, line in enumerate(run["output"]):
+                if "Output in csv format" in line:
+                    break
+
+            # Get output based on type of run
+            raw_results = run["output"][i:][1]
+
+            # Get endpoint output, parse into dataframe
+            results1 = [x.split(",") for x in raw_results.split("\\n")]
+            results2 = [sub[1:] for sub in results1]
+            results_dict = dict(zip(results2[0], results2[1]))
+            for key in results_dict:
+                if '[' in results_dict[key]:
+                    break
+                try:
+                    run[key] = float(results_dict[key]) 
+                except ValueError:
+                    continue
+                    
+            # Tick times
+            i = -10
+            for i, line in enumerate(run["output"]):
+                if "Raw tick" in line:
+                    break
+
+            run["tick_times"] = []
+            raw_results = run["output"][(i+1):]
+            i = 0
+            while "gather_worker_metrics" in raw_results[i]:
+                measured_value = str.strip(raw_results[i].split()[-1])
+                run["tick_times"].append(measured_value)
+                i += 1
+
+            # Response times
+            i = -10
+            for i, line in enumerate(run["output"]):
+                if "Measurer spawned" in line:
+                    break
+            
+            run["dig_times"] = []
+            run["place_times"] = []
+            raw_results = run["output"][(i + 1):]
+            i = 0
+            while "----------------------------" not in raw_results[i]:
+                if "Msr dig" in raw_results[i]: 
+                    measured_value = str.strip(raw_results[i].split('Msr dig:')[1])
+                    run["dig_times"].append(measured_value)
+                elif "Msr place" in raw_results[i]:
+                    measured_value = str.strip(raw_results[i].split('Msr place:')[1])
+                    run["place_times"].append(measured_value)
+                i += 1
+
+
+    def plot(self):
+        """Plot the results from executed runs"""
+        # set width of bar
+        plt.rcParams.update({"font.size": 19})
+
+        x = [run["cores"] / 100 if run["cores"] / 100 < 1 else int(run["cores"] / 100) for run in self.runs]
+
+        y1 = [run["tick_times"] for run in self.runs]
+        y1 = [[float(x) for x in lst] for lst in y1]
+
+        max_length_y1 = max(len(sublist) for sublist in y1)
+
+        # Pad sublists with NaN values to ensure equal length
+        y1_padded = [sublist + [np.nan] * (max_length_y1 - len(sublist)) for sublist in y1]
+
+        y1_stacked = np.vstack(y1_padded).tolist()
+
+        logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
+        plt.figure(figsize=(10, 6))
+        
+        sbn.boxplot(data=y1_stacked, width = 0.3)
+        plt.xticks(ticks=range(len(x)), labels=x)
+        plt.yticks(np.arange(0, 501, 50))
+        plt.xlim(left=0.75)
+        plt.ylim(0, 500)
+        plt.xlabel("Server CPU Cores")
+        plt.ylabel("Tick duration [ms]")
+        plt.axhline(y=50, color='r')
+        plt.grid(True)
+
+        t = time.strftime("%Y-%m-%d_%H:%M:%S", time.gmtime())
+        #plt.savefig("./logs/MCCpuMemScalingTickDur_%s.pdf" % (t), bbox_inches="tight")
+
+        # Ticks over time
+        plt.clf()
+
+        plt.rcParams.update({"font.size": 19})
+        y1 = next(filter(lambda run : run["cores"] == 200, self.runs))["tick_times"]
+        y1 = [float(x) for x in y1]
+        x1 = []
+        x1.append(y1[0]) if y1[0] > 50 else x1.append(50)
+
+        for elem in y1[1:]:
+            x1.append(x1[-1] + elem) if elem > 50 else x1.append(x1[-1] + 50)
+        x1 = [elem / 1000 for elem in x1]
+
+        plt.plot(
+            x1,
+            y1,
+            linewidth=1.5,
+        )
+        plt.axhline(y=50, color='r')
+        plt.ylabel("Tick duration [ms]")
+        plt.xlabel("Time [s]")
+        plt.grid(True)
+
+        plt.yticks(np.arange(0, 501, 50))
+        plt.xticks(np.arange(0, 481, 120))
+
+        #plt.xlim(0, 960)
+        t = time.strftime("%Y-%m-%d_%H:%M:%S", time.gmtime())
+        plt.savefig("./logs/MCCPUScalingTicksOverTime2C_%s.pdf" % (t), bbox_inches="tight")
+        plt.clf()
+
+        # Response times plot  
+        y1 = [run["dig_times"] for run in self.runs]
+        y2 = [run["place_times"] for run in self.runs]
+
+        y1 = [[int(x) for x in lst] for lst in y1]
+        y2 = [[int(x) for x in lst] for lst in y2]
+
+        # Function to pad sublists with NaNs to ensure equal length
+        def pad_list(lst, length):
+            return lst + [float('nan')] * (length - len(lst))
+
+        # Pad sublists in y1 and y2
+        max_length_y1 = max(len(sublist) for sublist in y1)
+        max_length_y2 = max(len(sublist) for sublist in y2)
+        max_sublist_length = max(max_length_y1, max_length_y2)
+        y1_padded = [pad_list(sublist, max_sublist_length) for sublist in y1]
+        y2_padded = [pad_list(sublist, max_sublist_length) for sublist in y2]
+
+        df = pd.DataFrame({
+            "Block digging": y1_padded,
+            "Block placement": y2_padded,
+            "Network latency": x
+        })
+
+        df_exploded = df.explode(column=["Block digging", "Block placement"])
+
+        df_melted = pd.melt(df_exploded, id_vars=["Network latency"], var_name="Action", value_name="Values")
+
+        #df_melted = df_melted.dropna()
+
+        # Create boxplot using Seaborn
+        logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
+        plt.figure(figsize=(10, 6))
+        sbn.boxplot(x="Network latency", y="Values", hue="Action", data=df_melted, dodge=True, palette="pastel")
+        plt.ylim(0, 1000)
+        plt.yticks(np.arange(0, 1001, 100))
+        plt.xlim(left=0.50)
+        plt.xlabel("CPU Cores")
+        plt.ylabel("Response time [ms]")
+        plt.grid(True)
+
+        t = time.strftime("%Y-%m-%d_%H:%M:%S", time.gmtime())
+        #plt.savefig("./logs/MCCPUScalingLatencies_%s.pdf" % (t), bbox_inches="tight")
+
+    def print_result(self):
+        """Print results of runs as text"""
+        for run in self.runs:
+            logging.info(
+                "Tick duration mean: %5i ms | \
+                Tick duration median: %5i ms | \
+                Tick duration stdev: %5i ms |",
+                run["ticks_mean"],
+                run["ticks_median"],
+                run["ticks_stdev"],
             )
 
 def main(args):
-    exp = EndpointScaling(args.resume)
+    if (args.experiment == "EndpointScaling"):
+        exp = EndpointScaling(args.resume)
+    elif (args.experiment == "LatencyVariation"):
+        exp = LatencyCPUVariation(args.resume)
+    else:
+        exp = CpuMemScaling(args.resume)
 
     logging.info(exp)
     exp.generate()
@@ -506,6 +985,11 @@ if __name__ == "__main__":
         "--resume",
         type=lambda s: datetime.datetime.strptime(s, "%Y-%m-%d_%H:%M:%S"),
         help='Resume a previous figure replication from datetime "YYYY-MM-DD_HH:mm:ss"',
+    )
+    parser_obj.add_argument(
+        "experiment",
+        type=str,
+        choices=["EndpointScaling", "LatencyVariation", "CpuMemScaling"],
     )
     arguments = parser_obj.parse_args()
 
