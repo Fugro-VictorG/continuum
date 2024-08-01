@@ -16,8 +16,13 @@ spec:
     imagePullPolicy: Always
     resources:
       requests:
-        memory: "{{ memory_req }}Mi"
-        cpu: {{ cpu_req }}
+        memory: "{{ memory_req|int - 500 }}Mi"
+        cpu: {{ cpu_req|int - 1 }}
+    env:
+      - name: MEMORY
+        value: "{{ memory_req|int - 500 }}M"
+      - name: VIEW_DISTANCE
+        value: "5"
 
 ---
 apiVersion: v1

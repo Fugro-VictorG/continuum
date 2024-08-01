@@ -32,13 +32,34 @@
 
         sudo sysctl --system
 
+    - name: Create kubelet config file (default)
+      shell: |
+        cat > "/home/{{ username }}/config.yaml" <<EOF
+        apiVersion: kubeadm.k8s.io/v1beta3
+        kind: InitConfiguration
+        localAPIEndpoint:
+          advertiseAddress: {{ cloud_ip }}
+        ---
+        apiVersion: kubeadm.k8s.io/v1beta3
+        kind: ClusterConfiguration
+        apiServer:
+          certSANs:
+          - {{ cloud_ip }}
+        networking:
+          podSubnet: 10.244.0.0/16
+        ---
+        apiVersion: kubelet.config.k8s.io/v1beta1
+        kind: KubeletConfiguration
+        containerLogMaxSize: "100Mi"
+        containerLogMaxFiles: 10
+        EOF
+
     - name: Initialize the Kubernetes cluster using kubeadm
       command: >
         kubeadm init
-          --apiserver-advertise-address={{ cloud_ip }}
-          --apiserver-cert-extra-sans={{ cloud_ip }}
           --node-name {{ ansible_hostname }}
-          --pod-network-cidr=10.244.0.0/16
+          --ignore-preflight-errors all
+          --config /home/{{ username }}/config.yaml
 
     - name: Create user Kubernetes directory
       file:

@@ -12,10 +12,16 @@ def set_container_location(config):
     Args:
         config (dict): Parsed configuration
     """
-    config["images"] = {
-        "worker": "2000arp/opencraft_benchmark:opencraft_server",
-        "endpoint": "2000arp/opencraft_benchmark:opencraft_bot",
-    }
+    if config["benchmark"]["server"] == "opencraft":
+        config["images"] = {
+            "worker": "2000arp/opencraft_benchmark:opencraft_server",
+            "endpoint": "2000arp/opencraft_benchmark:opencraft_bot",  
+        }
+    else:
+        config["images"] = {
+            "worker": "2000arp/minecraft_benchmark:minecraft_server",
+            "endpoint": "2000arp/minecraft_benchmark:minecraft_bot"
+        }
 
 def add_options(_config):
     """Add config options for a particular module
@@ -28,7 +34,8 @@ def add_options(_config):
     """
     settings = [
         ["steps_bot", int, lambda x: x >= 1, True, None],
-        ["join_strategy", str, lambda x: x == "LinearJoin" or "FixedJoin" or "Default", True, "Default"]
+        ["join_strategy", str, lambda x: x == "LinearJoin" or "FixedJoin" or "Default", False, "Default"],
+        ["server", str, lambda x: x == "opencraft" or "minecraft", True, None]
     ]
     return settings
 
@@ -99,21 +106,27 @@ def gather_worker_metrics(_machines, _config, worker_output, _starttime):
         # the first rows are only the logs of the server console which we don't care about :O
 
         idx = 0
-        while "timestamp" not in out[idx]:
+        while idx < len(out) and "timestamp" not in out[idx]:
             idx += 1
+        
+        if idx >= len(out):
+            return []
 
-        # filter data based on tick
-        filtered_data = [out[idx].split()]
-        for row_idx in range(idx + 1, len(out)):
-            # change the following line to get more metrics captured
-            row_split = out[row_idx].split()
-            if "tick" == row_split[2]:
-                filtered_data.append(row_split)
+        if _config["benchmark"]["server"] == "opencraft":
+            filtered_data = getTicksFromOpencraft(out, idx)
+        else:
+            filtered_data = getTicksFromJmxOutput(out, idx)
+            logging.info("Raw tick duration")
+            idx = 1
+            while idx < len(filtered_data):
+                filtered_data[idx] = float(filtered_data[idx]) / 1000000.0
+                logging.info(filtered_data[idx])
+                idx += 1
 
         # calculate metrics
         df = pd.DataFrame(filtered_data[1:], columns=filtered_data[0])
-        df["value"] = pd.to_numeric(df["value"])
         # filter before the following lines if you have more than one metric
+        df["value"] = pd.to_numeric(df["value"])
         w_metrics["ticks_mean"] = df["value"].mean()
         w_metrics["ticks_median"] = df["value"].median()
         w_metrics["ticks_stdev"] = df["value"].std()
@@ -131,7 +144,7 @@ def gather_endpoint_metrics(config, endpoint_output, container_names):
             filtered_data = {
                 "response_time_dig" : [],
                 "response_time_place": []
-                }
+            }
             e_metrics = {
                 "response_time_dig_mean": None,
                 "response_time_dig_median": None,
@@ -144,10 +157,15 @@ def gather_endpoint_metrics(config, endpoint_output, container_names):
                 line_partition = str(line).partition(": ")
                 index_and_type = line_partition[0]
                 latency = line_partition[2]
-                if latency and ("Dig" in index_and_type):
+                if latency and ("Msr dig" in index_and_type):
                     filtered_data["response_time_dig"].append(int(latency))
-                elif latency and ("Place" in index_and_type):
+                elif latency and ("Msr place" in index_and_type):
                     filtered_data["response_time_place"].append(int(latency))
+            
+            data_max_length = max(len(filtered_data["response_time_dig"]), len(filtered_data["response_time_place"]))
+            filtered_data["response_time_dig"] = filtered_data["response_time_dig"] + [np.nan] * (data_max_length - len(filtered_data["response_time_dig"]))
+            filtered_data["response_time_place"] = filtered_data["response_time_place"] + [np.nan] * (data_max_length - len(filtered_data["response_time_place"]))
+
             df = pd.DataFrame(filtered_data)
             e_metrics["response_time_dig_mean"] = df["response_time_dig"].mean()
             e_metrics["response_time_dig_median"] = df["response_time_dig"].median()
@@ -184,3 +202,24 @@ def format_output(config, worker_metrics, endpoint_metrics):
     
     # Print ouput in csv format
     logging.debug("Output in csv format\n%s", repr(df.to_csv()))
+
+
+def getTicksFromOpencraft(out, idx):
+    """ filter data based on tick
+    """
+    filtered_data = [out[idx].split()]
+    for row_idx in range(idx + 1, len(out)):
+        # change the following line to get more metrics captured
+        row_split = out[row_idx].split()
+        if "tick" == row_split[2]:
+            filtered_data.append(row_split)
+
+    return filtered_data
+
+def getTicksFromJmxOutput(out, idx):
+    filteredData = [['value']]
+    for row_idx in range(idx + 1, len(out)):
+        row_split = out[row_idx].split()
+        filteredData.append(row_split[1].split(',')[1])
+
+    return filteredData

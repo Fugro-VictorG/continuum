@@ -82,7 +82,7 @@ def print_raw_output(config, worker_output, endpoint_output):
         logging.debug("%s OUTPUT", config["mode"].upper())
         logging.debug("------------------------------------")
         for _, out in worker_output:
-            if out.len() < 1000:
+            if len(out) < 10000:
                 for line in out:
                     logging.debug(line)
 
@@ -258,8 +258,9 @@ def kube(config, machines):
     # Start the endpoint
     container_names = endpoint.start_endpoint(config, machines)
 
-    if config["benchmark"]["application"] == "opencraft" and config["benchmark"]["join_strategy"] == "LinearJoin":
-        wait_linear_join_completion(config)
+    if config["benchmark"]["application"] == "opencraft" and config["benchmark"]["join_strategy"] != "Default":
+        time_limit = get_time_limit(config)
+        start_metric_collector(config, machines, time_limit)
     else:
         endpoint.wait_endpoint_completion(config, machines, config["endpoint_ssh"], container_names)
 
@@ -360,7 +361,7 @@ def kube_control(config, machines):
         endtime=float(endtime - starttime),
     )
 
-def stop_opencraft(config, machines):
+def start_metric_collector(config, machines, benchmark_duration):
     """_summary_
     Args:
         config (_type_): _description_
@@ -374,8 +375,37 @@ def stop_opencraft(config, machines):
         command = (
             '"kubectl exec -it '
             + pod_name
-            + " -- /bin/sh -c 'pkill java' "
-            + '--kubeconfig=/home/cloud_controller/.kube/config"'
+            + " -- java -jar ../jmxClient.jar net.minecraft.server.v1_16_R2:type=Server 25585 logs "
+            + str((benchmark_duration * 1000))
+            + '"'
+        )
+        machines[0].process(
+            config, (command), shell=True, ssh=config["cloud_ssh"][0]
+        )
+
+def stop_opencraft(config, machines):
+    """_summary_
+    Args:
+        config (_type_): _description_
+        machines (_type_): _description_
+    """
+
+    if (config["benchmark"]["server"] == "opencraft"):
+        execCommand = "/bin/sh -c 'pkill java'"
+    else:
+        execCommand = "rcon-cli stop"
+
+    command = "kubectl get pods -l applicationRunning=opencraft-server --no-headers"
+    output, error = machines[0].process(config, command, shell=True, ssh=config["cloud_ssh"][0])[0]
+
+    for line in output:
+        pod_name = line.split()[0]
+        command = (
+            '"kubectl exec -it '
+            + pod_name
+            + " -- "
+            + execCommand
+            + '"'
         )
         output, error = machines[0].process(
             config, (command), shell=True, ssh=config["cloud_ssh"][0]
@@ -386,10 +416,19 @@ def stop_opencraft(config, machines):
         if any(["input is not a terminal or the right kind of file" not in e for e in error]):
             logging.error(error)
             sys.exit()
+
+def get_time_limit(config):
+    if (config["benchmark"]["join_strategy"] == "FixedJoin"):
+        return 1800
+    if (config["infrastructure"]["endpoint_nodes"] < 10):
+        return 120
+    else:
+        return math.ceil(config["infrastructure"]["endpoint_nodes"] / 10) * 120
             
-def wait_linear_join_completion(config):
+def wait_for_completion(time_limit):
+    logging.info("Waiting for completion")
     start_time = time.time()
-    time_limit = math.floor(config["infrastructure"]["endpoint_nodes"] / 10) * 120
+    
     elapsed_time = (time.time() - start_time)
     while (elapsed_time < time_limit):
         elapsed_time = (time.time() - start_time)
